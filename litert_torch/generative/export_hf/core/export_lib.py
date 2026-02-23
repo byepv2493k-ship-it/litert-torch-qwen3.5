@@ -312,7 +312,10 @@ def export_text_prefill_decode_model(
         sample_kwargs=sample_decode_inputs,
     )
 
-  lrt_model = converter.convert(strict_export=False)
+  lrt_model = converter.convert(
+      lightweight_conversion=True,
+      strict_export=False,
+  )
 
   lrt_model = mu_pass_lib.update_model(lrt_model)
   if export_config.experimental_use_mixed_precision:
@@ -400,7 +403,10 @@ def export_embedder_model(
         embedder_module.eval(),
         sample_kwargs=sample_inputs,
     )
-  lrt_model = converter.convert(strict_export=False)
+  lrt_model = converter.convert(
+      lightweight_conversion=True,
+      strict_export=False,
+  )
   model_path = os.path.join(work_dir, 'embedder.tflite')
   lrt_model.export(model_path)
   quantization_recipe_list = (
@@ -584,7 +590,7 @@ def export_additional_models(
     source_model_artifacts: SourceModelArtifacts,
     export_config: exportable_module.ExportableModuleConfig,
     exported_model_artifacts: ExportedModelArtifacts,
-)-> ExportedModelArtifacts:
+) -> ExportedModelArtifacts:
   """Exports embedder."""
   exportable_model_cls_dict = model_ext_exportables.get_additional_exportables(
       source_model_artifacts.model_config
