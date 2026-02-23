@@ -15,3 +15,4 @@
 """Export HF model extensions."""
 
 from litert_torch.generative.export_hf.model_ext.gemma3 import patch as _
+from litert_torch.generative.export_hf.model_ext.gemma3n import patch as _

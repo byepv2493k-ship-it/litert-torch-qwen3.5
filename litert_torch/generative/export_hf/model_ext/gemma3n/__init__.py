@@ -12,21 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Exportable modules for extended modules."""
-
-from litert_torch.generative.export_hf.model_ext.gemma3 import metadata_builder as gemma3_metadata_builder
-import transformers
-
-
-def get_metadata_builder(
-    model_config: transformers.PretrainedConfig,
-):
-  """Gets metadata builder."""
-  if model_config.model_type == 'gemma3':
-    return gemma3_metadata_builder.build_llm_metadata
-  elif model_config.model_type == 'gemma3n':
-    return gemma3_metadata_builder.build_llm_metadata
-  else:
-    return (
-        lambda source_model_artifacts, export_config, exported_model_artifacts, llm_metadata: llm_metadata
-    )

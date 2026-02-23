@@ -201,13 +201,14 @@ def build_llm_metadata(
           )
       )
   # Model specific metadata builders.
-  metadata_builder = metadata_builder_lib.get_metadata_builder(model.config)
-  llm_metadata = metadata_builder(
-      source_model_artifacts,
-      export_config,
-      exported_model_artifacts,
-      llm_metadata,
-  )
+  if not litert_lm_model_type_override:
+    metadata_builder = metadata_builder_lib.get_metadata_builder(model.config)
+    llm_metadata = metadata_builder(
+        source_model_artifacts,
+        export_config,
+        exported_model_artifacts,
+        llm_metadata,
+    )
 
   return llm_metadata
 
@@ -231,16 +232,24 @@ def package_model(
     chat_templates = parse_chat_template(tokenizer)
   if not chat_templates:
     print('WARNING: Chat template is not found. Using empty template.')
-  llm_metadata = build_llm_metadata(
-      source_model_artifacts,
-      export_config,
-      chat_templates,
-      exported_model_artifacts,
-      litert_lm_model_type_override,
-  )
-  llm_metadata_path = os.path.join(work_dir, 'llm_metadata.pb')
-  with open(llm_metadata_path, 'wb') as f:
-    f.write(llm_metadata.SerializeToString())
+  if export_config.litert_lm_llm_metadata_override:
+    if os.path.exists(export_config.litert_lm_llm_metadata_override):
+      llm_metadata_path = export_config.litert_lm_llm_metadata_override
+    else:
+      llm_metadata_path = os.path.join(work_dir, 'llm_metadata.pbtext')
+      with open(llm_metadata_path, 'w') as f:
+        f.write(export_config.litert_lm_llm_metadata_override)
+  else:
+    llm_metadata = build_llm_metadata(
+        source_model_artifacts,
+        export_config,
+        chat_templates,
+        exported_model_artifacts,
+        litert_lm_model_type_override,
+    )
+    llm_metadata_path = os.path.join(work_dir, 'llm_metadata.pb')
+    with open(llm_metadata_path, 'wb') as f:
+      f.write(llm_metadata.SerializeToString())
 
   builder = litertlm_builder.LitertLmFileBuilder()
   builder.add_system_metadata(
@@ -282,6 +291,19 @@ def package_model(
         exported_model_artifacts.auxiliary_model_path,
         litertlm_builder.TfLiteModelType.AUX,
     )
+  if exported_model_artifacts.additional_model_paths:
+    for (
+        name,
+        model_path,
+    ) in exported_model_artifacts.additional_model_paths.items():
+      if name == 'per_layer_embedder':
+        model_type = litertlm_builder.TfLiteModelType.PER_LAYER_EMBEDDER
+      else:
+        raise ValueError(f'Unsupported additional model type: {name}')
+      builder.add_tflite_model(
+          model_path,
+          model_type,
+      )
   model_path = os.path.join(output_dir, 'model.litertlm')
   with open(model_path, 'wb') as f:
     builder.build(f)

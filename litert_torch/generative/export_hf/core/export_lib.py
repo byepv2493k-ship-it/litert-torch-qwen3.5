@@ -67,6 +67,7 @@ class ExportedModelArtifacts:
   vision_adapter_model_path: str | None = None
   auxiliary_model_path: str | None = None
   tokenizer_model_path: str | None = None
+  additional_model_paths: dict[str, str] | None = None
 
   litert_lm_model_path: str | None = None
 
@@ -189,9 +190,17 @@ def load_model(
 
 
 def get_prefill_decode_exportable_cls(
+    model_config: transformers.PretrainedConfig,
     export_config: exportable_module.ExportableModuleConfig,
 ):
   """Gets exportable module class."""
+  model_specific_exportables = (
+      model_ext_exportables.get_prefill_decode_exportables(
+          model_config, export_config
+      )
+  )
+  if model_specific_exportables:
+    return model_specific_exportables
   if export_config.split_cache:
     return (
         split_cache_module.LiteRTSplitCacheExportableModuleForDecoderOnlyLMPrefill,
@@ -237,7 +246,7 @@ def export_text_prefill_decode_model(
     model.set_attn_implementation('lrt_transposed_attention')
 
   prefill_module_cls, decode_module_cls = get_prefill_decode_exportable_cls(
-      export_config
+      source_model_artifacts.model_config, export_config
   )
   prefill_module = prefill_module_cls(model, export_config)
   decode_module = decode_module_cls(model, export_config)
@@ -529,6 +538,67 @@ def export_auxiliary_model(
       exported_model_artifacts,
       auxiliary_model_path=model_path,
   )
+
+
+def export_additional_models_impl(
+    name: str,
+    exportable_module_cls: torch.nn.Module,
+    source_model_artifacts: SourceModelArtifacts,
+    export_config: exportable_module.ExportableModuleConfig,
+    exported_model_artifacts: ExportedModelArtifacts,
+) -> ExportedModelArtifacts:
+  """Exports additional model."""
+  model = source_model_artifacts.model
+  text_model_config = source_model_artifacts.text_model_config
+  quantization_recipe = export_config.quantization_recipe
+  work_dir = export_config.work_dir
+  embedder_module = exportable_module_cls(model)
+  converter = converter_utils.Converter()
+  sample_inputs = embedder_module.get_sample_inputs(
+      text_model_config, export_config
+  )
+  for signature_name, (sample_inputs, _) in sample_inputs.items():
+    converter.add_signature(
+        signature_name,
+        embedder_module.eval(),
+        sample_kwargs=sample_inputs,
+    )
+  lrt_model = converter.convert(strict_export=False)
+  model_path = os.path.join(work_dir, f'{name}.tflite')
+  lrt_model.export(model_path)
+  quantization_recipe_list = (
+      quantization_recipe.split(',') if quantization_recipe else [None]
+  )
+  for recipe in quantization_recipe_list:
+    model_path = maybe_quantize_model(model_path, recipe)
+    gc.collect()
+  additional_models = exported_model_artifacts.additional_model_paths or {}
+  additional_models[name] = model_path
+  return dataclasses.replace(
+      exported_model_artifacts,
+      additional_model_paths=additional_models,
+  )
+
+
+def export_additional_models(
+    source_model_artifacts: SourceModelArtifacts,
+    export_config: exportable_module.ExportableModuleConfig,
+    exported_model_artifacts: ExportedModelArtifacts,
+)-> ExportedModelArtifacts:
+  """Exports embedder."""
+  exportable_model_cls_dict = model_ext_exportables.get_additional_exportables(
+      source_model_artifacts.model_config
+  )
+  for name, exportable_module_cls in exportable_model_cls_dict.items():
+    with progress.task(f'Export {name} model'):
+      exported_model_artifacts = export_additional_models_impl(
+          name,
+          exportable_module_cls,
+          source_model_artifacts,
+          export_config,
+          exported_model_artifacts,
+      )
+  return exported_model_artifacts
 
 
 @progress.task('Export tokenizer')
