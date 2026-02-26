@@ -12,9 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Export HF model extensions."""
+"""Patch for LFM2."""
 
-from litert_torch.generative.export_hf.model_ext.gemma3 import patch as _
-from litert_torch.generative.export_hf.model_ext.gemma3n import patch as _
-from litert_torch.generative.export_hf.model_ext.lfm2 import cache as _
-from litert_torch.generative.export_hf.model_ext.lfm2 import patch as _
+import contextlib
+from litert_torch.generative.export_hf.model_ext import patches as patches_lib
+from litert_torch.generative.export_hf.model_ext.lfm2 import short_conv as short_conv_lib
+from transformers.models.lfm2 import modeling_lfm2
+
+
+@patches_lib.register_patch(["lfm2"])
+@contextlib.contextmanager
+def lfm2_litert_patch():
+  print("LFM2 patch applied.")
+  original_short_conv = modeling_lfm2.Lfm2ShortConv
+  modeling_lfm2.Lfm2ShortConv = short_conv_lib.Lfm2ShortConv
+
+  try:
+    yield
+  finally:
+    modeling_lfm2.Lfm2ShortConv = original_short_conv

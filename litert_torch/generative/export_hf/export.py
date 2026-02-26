@@ -42,6 +42,9 @@ def run_export_tasks(
       auto_model_override=auto_model_override,
       task=task,
   )
+  export_config = export_lib.update_export_config(
+      export_config, source_model_artifacts
+  )
   exported_model_artifacts = export_lib.ExportedModelArtifacts()
 
   # Suppress deprecation warnings to be compatible with older PyTorch.

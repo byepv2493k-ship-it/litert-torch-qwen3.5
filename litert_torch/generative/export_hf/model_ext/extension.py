@@ -12,9 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Export HF model extensions."""
+"""Extension for HF integration."""
 
-from litert_torch.generative.export_hf.model_ext.gemma3 import patch as _
-from litert_torch.generative.export_hf.model_ext.gemma3n import patch as _
-from litert_torch.generative.export_hf.model_ext.lfm2 import cache as _
-from litert_torch.generative.export_hf.model_ext.lfm2 import patch as _
+import dataclasses
+
+from litert_torch.generative.export_hf.core import exportable_module
+import transformers
+
+
+def update_export_config(
+    export_config: exportable_module.ExportableModuleConfig,
+    model_config: transformers.PretrainedConfig,
+) -> exportable_module.ExportableModuleConfig:
+  """Updates export config."""
+  match model_config.model_type:
+    case 'lfm2':
+      if export_config.split_cache:
+        raise ValueError('Split cache is not supported for LFM2.')
+      return dataclasses.replace(
+          export_config, cache_implementation='LiteRTLFM2Cache'
+      )
+    case _:
+      return export_config

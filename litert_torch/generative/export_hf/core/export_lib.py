@@ -18,7 +18,6 @@ import dataclasses
 import gc
 import json
 import os
-import time
 
 import huggingface_hub
 from litert_torch import fx_infra
@@ -36,6 +35,7 @@ from litert_torch.generative.export_hf.core.mu import mu_pass_lib
 from litert_torch.generative.export_hf.core.split_cache import attention as _
 from litert_torch.generative.export_hf.core.split_cache import exportable_module as split_cache_module
 from litert_torch.generative.export_hf.model_ext import exportables as model_ext_exportables
+from litert_torch.generative.export_hf.model_ext import extension as model_ext_extension
 from litert_torch.generative.export_hf.model_ext import patches as model_ext_patches
 from litert_torch.generative.tools import tokenizer_to_sentencepiece_lib as tokenizer_lib
 import torch
@@ -186,6 +186,16 @@ def load_model(
       text_model_config=text_model_config,
       tokenizer=tokenizer,
       image_processor=image_processor,
+  )
+
+
+def update_export_config(
+    export_config: exportable_module.ExportableModuleConfig,
+    source_model_artifacts: SourceModelArtifacts,
+) -> exportable_module.ExportableModuleConfig:
+  """Updates export config."""
+  return model_ext_extension.update_export_config(
+      export_config, source_model_artifacts.model_config
   )
 
 
