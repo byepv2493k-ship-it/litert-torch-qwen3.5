@@ -77,7 +77,6 @@ class ExportableModuleConfig:
     if self.split_cache:
       self.externalize_embedder = True
       self.externalize_rope = True
-      self.single_token_embedder = True
       if self.cache_implementation is None:
         self.cache_implementation = "LiteRTLMSplitCache"
 
@@ -85,6 +84,7 @@ class ExportableModuleConfig:
       case ExportTask.IMAGE_TEXT_TO_TEXT:
         if self.export_vision_encoder:
           self.externalize_embedder = True
+          self.single_token_embedder = True
       case _:
         self.export_vision_encoder = False
 

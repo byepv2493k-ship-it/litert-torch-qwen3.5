@@ -273,7 +273,7 @@ class SplitAttentionMaskBuilder(nn.Module):
 
     if len(local_masks) == 1:
       local_masks = list(local_masks.values())[0]
-    elif not local_masks:
+    elif not len(local_masks):
       local_masks = None
     return {
         'mask': attention_mask.SplitMask(

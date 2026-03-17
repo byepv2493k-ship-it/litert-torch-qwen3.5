@@ -191,7 +191,7 @@ def export(
   )
   if not export_config.bundle_litert_lm:
     keep_temporary_files = True
-  if not keep_temporary_files and not export_config.split_cache:
+  if not keep_temporary_files:
     print('Cleaning up temporary files.')
     shutil.rmtree(work_dir)
   print(

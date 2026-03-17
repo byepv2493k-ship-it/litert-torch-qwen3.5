@@ -526,9 +526,10 @@ def export_auxiliary_model(
         sample_kwargs=sample_input,
     )
   # Attention Mask
+  sliding_window_sizes = [getattr(text_model_config, 'sliding_window', None)]
   attention_mask_module = split_cache_module.SplitAttentionMaskBuilder(
       export_config.cache_length,
-      # TODO(weiyiw): Add sliding window sizes.
+      sliding_window_sizes=sliding_window_sizes,
   )
   sample_inputs = attention_mask_module.get_sample_inputs(
       text_model_config, export_config
@@ -629,6 +630,17 @@ def export_tokenizer(
   """Exports tokenizer."""
   tokenizer = source_model_artifacts.tokenizer
   work_dir = export_config.work_dir
+  if hasattr(tokenizer, 'vocab_file'):
+    tokenizer_path = tokenizer.vocab_file
+    if tokenizer_path.endswith('tokenizer.model'):
+      with open(tokenizer_path, 'rb') as f:
+        with open(os.path.join(work_dir, 'tokenizer.model'), 'wb') as f_out:
+          f_out.write(f.read())
+      tokenizer_path = os.path.join(work_dir, 'tokenizer.model')
+      return dataclasses.replace(
+          exported_model_artifacts,
+          tokenizer_model_path=tokenizer_path,
+      )
   try:
     tokenizer_path = tokenizer.save_pretrained(work_dir, legacy_format=False)
     # TODO(weiyiw): This is rough... polish it.

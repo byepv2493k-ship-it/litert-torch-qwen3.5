@@ -98,7 +98,7 @@ def _unflatten_mask(
     assert flat_name.startswith('local'), f'Invalid flat_name: {flat_name}'
     window_size = int(flat_name.split('_')[-1])
     local_masks[window_size] = values[flat_names.index(flat_name)]
-  if not local_masks:
+  if not len(local_masks):
     local_masks = None
   return Mask(mask=global_mask, local_masks=local_masks)
 
