@@ -17,7 +17,10 @@
 from typing import Callable
 
 import torch
-import torchao.quantization.pt2e.quantize_pt2e  # pylint: disable=unused-import
+try:
+    import torchao.quantization.pt2e.quantize_pt2e  # pylint: disable=unused-import
+except (ImportError, ModuleNotFoundError):
+    pass
 
 
 def tensor_to_nhwc(t: torch.Tensor):

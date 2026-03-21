@@ -25,7 +25,10 @@ from litert_torch._convert.fx_passes.optimize_layout_transposes_pass import layo
 from litert_torch._convert.fx_passes.optimize_layout_transposes_pass import layout_rewrite  # NOQA
 from litert_torch._convert.fx_passes.optimize_layout_transposes_pass import utils  # NOQA
 import torch
-import torchao.quantization.pt2e.quantize_pt2e  # pylint: disable=unused-import
+try:
+    import torchao.quantization.pt2e.quantize_pt2e  # pylint: disable=unused-import
+except (ImportError, ModuleNotFoundError):
+    pass
 
 
 TransposeFunc = Union[utils.tensor_to_nchw, utils.tensor_to_nhwc]

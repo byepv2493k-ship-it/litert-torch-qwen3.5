@@ -59,6 +59,7 @@ class FeedForwardType(enum.Enum):
 class AttentionType(enum.Enum):
   GLOBAL = enum.auto()
   LOCAL_SLIDING = enum.auto()
+  LINEAR_ATTENTION = enum.auto()
 
 
 @dataclasses.dataclass
@@ -182,6 +183,18 @@ class FeedForwardConfig:
 
 
 @dataclasses.dataclass
+class GatedDeltaNetConfig:
+  """Configuration for Gated DeltaNet (linear attention) layers."""
+  num_qk_heads: int = 16
+  num_v_heads: int = 16
+  qk_head_dim: int = 128
+  v_head_dim: int = 128
+  conv_kernel_dim: int = 4
+  use_output_gate: bool = True
+  use_bias: bool = False
+
+
+@dataclasses.dataclass
 class TransformerBlockConfig:
   """TransformerBlock module's parameters."""
 
@@ -205,6 +218,7 @@ class TransformerBlockConfig:
   # KV Cache length for this block. Only used when attention types are different
   # across blocks
   kv_cache_max_len: Optional[int] = None
+  gated_deltanet_config: Optional[GatedDeltaNetConfig] = None
 
 
 @dataclasses.dataclass
