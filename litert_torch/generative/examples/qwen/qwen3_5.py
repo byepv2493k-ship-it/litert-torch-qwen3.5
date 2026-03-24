@@ -58,7 +58,8 @@ class GatedCausalSelfAttention(nn.Module):
     q_and_gate = self.q_proj(x)
     q_and_gate = q_and_gate.view(B, T, self.num_heads, self.head_dim * 2)
     q, gate = q_and_gate.chunk(2, dim=-1)
-    gate = gate.reshape(B, T, -1)  # [B, T, num_heads * head_dim]
+    # gate: [B, T, num_heads, head_dim] -> reshape to [B, T, num_heads * head_dim]
+    gate = gate.reshape(B, T, -1)
 
     k = self.k_proj(x)
     v = self.v_proj(x)
@@ -80,6 +81,7 @@ class GatedCausalSelfAttention(nn.Module):
     sdpa_out, kv_cache = sdpa_with_kv_update.sdpa_with_kv_update(
         q, k, v, kv_cache, input_pos, mask, self.config, self.enable_hlfb
     )
+    # sdpa_out: [B, T, num_heads * head_dim]
 
     # Apply output gate: attn_output * sigmoid(gate)
     sdpa_out = sdpa_out * torch.sigmoid(gate)
@@ -211,7 +213,7 @@ class Qwen3_5(nn.Module):
     )
     self.lm_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
     if config.lm_head_share_weight_with_embedding:
-      self.lm_head.weight.data = self.tok_embedding.weight.data
+      self.lm_head.weight = self.tok_embedding.weight
     self.transformer_blocks = nn.ModuleList([
         HybridTransformerBlock(config.block_config(i), config)
         for i in range(config.num_layers)
@@ -241,16 +243,25 @@ class Qwen3_5(nn.Module):
       mask = self.mask_cache.index_select(2, input_pos)[
           :, :, :, :kv_cache.get_max_seq_len()
       ]
-    kv_idx, updated_kv = 0, []
+
+    # KVCache.from_model_config creates entries for ALL layers (including
+    # linear attention layers). We must index by the overall layer index,
+    # not by a separate counter for full-attention layers only.
+    updated_kv = []
     for i, block in enumerate(self.transformer_blocks):
       if self.is_linear[i]:
         x = block(x)
+        if kv_cache is not None:
+          # Pass through the existing KV cache entry unchanged
+          updated_kv.append(kv_cache.caches[i])
       else:
-        kv_entry = kv_cache.caches[kv_idx] if kv_cache else None
+        kv_entry = kv_cache.caches[i] if kv_cache else None
         x, kv_entry = block(x, rope, mask, input_pos, kv_entry)
         if kv_entry:
           updated_kv.append(kv_entry)
-        kv_idx += 1
+        else:
+          updated_kv.append(kv_cache.caches[i] if kv_cache else None)
+
     new_kv = kv_utils.KVCache(tuple(updated_kv))
     if export_config is not None:
       if (
@@ -291,6 +302,7 @@ def _load_checkpoint_custom(model, checkpoint_path):
     in_proj_a.weight     -> [num_v_heads, hidden]
     in_proj_b.weight     -> [num_v_heads, hidden]
     conv1d.weight        -> [q_dim+k_dim+v_dim, 1, kernel_size]
+    conv1d.bias          -> [q_dim+k_dim+v_dim]
     A_log                -> [num_qk_heads]
     dt_bias              -> [num_qk_heads]
     norm.weight          -> [v_dim]
@@ -307,7 +319,7 @@ def _load_checkpoint_custom(model, checkpoint_path):
   state = _load_safetensors(checkpoint_path)
   converted = {}
 
-  # Embedding
+  # Embedding (also used as lm_head via weight tying)
   converted["tok_embedding.weight"] = state.pop(
       "model.language_model.embed_tokens.weight"
   )
@@ -359,12 +371,21 @@ def _load_checkpoint_custom(model, checkpoint_path):
           f"{la}.out_proj.weight"
       )
 
-      # Split conv1d for separate q/k/v convs
+      # Split conv1d for separate q/k/v convs (weight AND bias)
       conv_weight = state.pop(f"{la}.conv1d.weight")
       cq, ck, cv = torch.split(conv_weight, [q_dim, k_dim, v_dim], dim=0)
       converted[f"{prefix}.atten_func.q_conv.weight"] = cq
       converted[f"{prefix}.atten_func.k_conv.weight"] = ck
       converted[f"{prefix}.atten_func.v_conv.weight"] = cv
+
+      # Conv1d bias
+      conv_bias_key = f"{la}.conv1d.bias"
+      if conv_bias_key in state:
+        conv_bias = state.pop(conv_bias_key)
+        bq, bk, bv = torch.split(conv_bias, [q_dim, k_dim, v_dim], dim=0)
+        converted[f"{prefix}.atten_func.q_conv.bias"] = bq
+        converted[f"{prefix}.atten_func.k_conv.bias"] = bk
+        converted[f"{prefix}.atten_func.v_conv.bias"] = bv
 
       # Decay and beta
       converted[f"{prefix}.atten_func.A_log"] = state.pop(f"{la}.A_log")
@@ -407,15 +428,6 @@ def _load_checkpoint_custom(model, checkpoint_path):
         converted[f"{prefix}.atten_func.k_norm.weight"] = state.pop(
             f"{sa}.k_norm.weight"
         )
-
-      # Biases (if present)
-      for proj in ["q_proj", "k_proj", "v_proj"]:
-        bkey = f"{sa}.{proj}.bias"
-        if bkey in state:
-          converted[f"{prefix}.atten_func.{proj}.bias"] = state.pop(bkey)
-      okey = f"{sa}.o_proj.bias"
-      if okey in state:
-        converted[f"{prefix}.atten_func.output_projection.bias"] = state.pop(okey)
 
   # Log remaining keys
   remaining_lm = [k for k in state if k.startswith("model.language_model.")]
