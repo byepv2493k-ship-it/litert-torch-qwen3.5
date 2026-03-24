@@ -171,25 +171,6 @@ def _stablehlo_to_vhlo(ir_text: str) -> bytes:
   return module_bytecode
 
 
-def _remap_call_symbols(block: ir.Block, name_remap: dict[str, str]):
-  """Recursively update func.call callee references in a block."""
-  for op in block.operations:
-    if (
-        hasattr(op, "OPERATION_NAME")
-        and op.OPERATION_NAME == func.CallOp.OPERATION_NAME
-    ):
-      call_op = cast(func.CallOp, op)
-      old_callee = call_op.callee.value
-      if old_callee in name_remap:
-        call_op.attributes["callee"] = ir.FlatSymbolRefAttr.get(
-            name_remap[old_callee]
-        )
-    # Recurse into nested regions
-    for region in op.regions:
-      for inner_block in region.blocks:
-        _remap_call_symbols(inner_block, name_remap)
-
-
 def wrap(jaxfn: Callable[Any, Any], ir_input_names: list[str] = None):
   """Return the wrapped JAX function to be used in ODMLTorch lowerings.
 
@@ -239,59 +220,21 @@ def wrap(jaxfn: Callable[Any, Any], ir_input_names: list[str] = None):
       symbol_table = ir.SymbolTable(module.operation)
       main_func = symbol_table["main"]
 
-      # Generate a unique suffix for ALL symbols from this JAX module
-      # to prevent collisions when multiple JAX lowerings are merged.
-      unique_suffix = uuid.uuid4().hex[:16]
-
-      # First, clone all non-main helper functions with unique names
-      # and build a name mapping for updating call references.
-      name_remap = {}
-      helper_funcs = []
-      for op in module.body.operations:
-        if (
-            hasattr(op, "OPERATION_NAME")
-            and op.OPERATION_NAME == func.FuncOp.OPERATION_NAME
-        ):
-          fn = cast(func.FuncOp, op)
-          old_name = fn.name.value
-          if old_name != "main":
-            new_name = f"{old_name}_{unique_suffix}"
-            name_remap[old_name] = new_name
-            helper_funcs.append(fn)
-
-      # Insert helper functions into the target module with new names
-      with ir.InsertionPoint.at_block_begin(lctx.ir_module.body):
-        for fn in helper_funcs:
-          cloned_helper = cast(func.FuncOp, fn.clone())
-          old_name = fn.name.value
-          cloned_helper.attributes["sym_name"] = ir.StringAttr.get(
-              name_remap[old_name]
-          )
-          cloned_helper.attributes["sym_visibility"] = ir.StringAttr.get(
-              "private"
-          )
-          # Update any call ops inside this helper to use remapped names
-          _remap_call_symbols(cloned_helper.entry_block, name_remap)
-
-      # Clone main function with unique name
       with ir.InsertionPoint.at_block_begin(lctx.ir_module.body):
         cloned_func = cast(func.FuncOp, main_func.clone())
-        cloned_func_name = f"{jaxfn.__name__}_{unique_suffix[:8]}"
+        # Use full 32-char UUID hex to avoid birthday paradox collisions
+        # in models with many JAX-lowered operations (e.g. 24-layer
+        # transformers with recurrent attention can have 10k+ ops).
+        cloned_func_name = f"{jaxfn.__name__}_{uuid.uuid4().hex}"
         cloned_func.attributes["sym_name"] = ir.StringAttr.get(cloned_func_name)
         cloned_func.attributes["sym_visibility"] = ir.StringAttr.get("private")
-        # Update call ops in main to reference remapped helper names
-        _remap_call_symbols(cloned_func.entry_block, name_remap)
-
-      # Build a combined symbol table for inlining that includes
-      # both the target module's symbols and the remapped helpers.
-      target_symbol_table = ir.SymbolTable(lctx.ir_module.operation)
 
       # HACK: Use the custom inliner implemented in Python because MLIR inline
       # pass from JAX's MLIR pybinding build in OSS cannot properly inline
       # func.call ops.
       # This should be switched to `passes.inline(module)` when we have our own
       # MLIR pybinding build.
-      export_utils.inline(target_symbol_table, cloned_func.entry_block)
+      export_utils.inline(symbol_table, cloned_func.entry_block)
 
       func_op = cloned_func
       jlcache.set_func_op(identifier, func_op)
